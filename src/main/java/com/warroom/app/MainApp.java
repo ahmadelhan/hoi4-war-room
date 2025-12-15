@@ -98,12 +98,37 @@ public class MainApp extends Application {
 
                     String text = readAllToString(contentBytes);
 
-                    int limit = Math.min(text.length(), 200_000);
+                    int limit = Math.min(text.length(), 200_000_000);
                     String parseText = text.substring(0, limit);
+
+                    int lastClose = parseText.lastIndexOf('}');
+                    if (lastClose > 0) {
+                        parseText = parseText.substring(0, lastClose + 1);
+                    }
+
+                    boolean hasPlayerCountries = parseText.contains("player_countries");
+                    final boolean finalHasPlayerCountries = hasPlayerCountries;
 
                     var tokenizer = new com.warroom.parser.Tokenizer(parseText);
                     var tokens = tokenizer.tokenize();
                     var root = new com.warroom.parser.ClausewitzParser(tokens).parseRoot();
+
+                    StringBuilder keys = new StringBuilder();
+                    int count = 0;
+                    for (String k : root.map().keySet()) {
+                        if (count++ >= 40) break;
+                        keys.append(k).append(", ");
+                    }
+                    final String rootKeysPreview = keys.toString();
+
+                    var pc = getObj(root, "player_countries");
+                    java.util.List<String> tags = new java.util.ArrayList<>();
+                    if (pc != null) {
+                        tags.addAll(pc.map().keySet());
+                    }
+                    java.util.Collections.sort(tags);
+
+                    final java.util.List<String> finalTags = tags;
 
                     String player = getString(root, "player");
                     String date = getString(root, "date");
@@ -125,7 +150,12 @@ public class MainApp extends Application {
                     javafx.application.Platform.runLater(() -> {
                         logArea.appendText(msg);
                         logArea.appendText(parseDemo);
-                        statusLabel.setText("Loaded (" + finalCompression + ")");
+                        statusLabel.setText("Loaded (" + finalCompression + ") - " + finalTags.size() + " countries");
+                        logArea.appendText("Debug: parseText has player_countries = " + finalHasPlayerCountries + "\n");
+                        logArea.appendText("Root keys (first ~40): " + rootKeysPreview + "\n");
+                        countryBox.getItems().setAll(finalTags);
+                        countryBox.setDisable(finalTags.isEmpty());
+                        if (!finalTags.isEmpty()) countryBox.getSelectionModel().selectFirst();
                     });
 
 
@@ -178,6 +208,15 @@ public class MainApp extends Application {
             return sv.v();
         }
         return v == null ? "(missing)" : v.toString();
+    }
+
+    private static com.warroom.parser.ClausewitzParser.ObjVal getObj(
+            com.warroom.parser.ClausewitzParser.ObjVal obj,
+            String key
+    ) {
+        var v = obj.map().get(key);
+        if (v instanceof com.warroom.parser.ClausewitzParser.ObjVal ov) return ov;
+        return null;
     }
 
     private static boolean looksLikeZip(byte[] bytes){

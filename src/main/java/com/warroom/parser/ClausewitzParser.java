@@ -56,37 +56,84 @@ public class ClausewitzParser {
         Map<String, Value> obj = new LinkedHashMap<>();
 
         while (!peek(RBRACE)) {
-            if (peek(IDENT) && peekNext(EQUALS) == false) {
-                p++;
+
+            if (peek(LBRACE)) {
+                Value v = parseValue();
+                addAnonymous(obj, v);
                 continue;
             }
 
-            String key = expect(IDENT).text();
-            expect(EQUALS);
-            Value val = parseValue();
-            putHandlingDuplicates(obj, key, val);
+            if (peek(NUMBER) || peek(STRING)) {
+                Value v = parseValue();
+                addAnonymous(obj, v);
+                continue;
+            }
+
+            if (peek(IDENT)) {
+                if (peekNext(EQUALS)) {
+                    String key = expect(IDENT).text();
+                    expect(EQUALS);
+                    Value val = parseValue();
+                    putHandlingDuplicates(obj, key, val);
+                    continue;
+                }
+
+                Value v = parseValue();
+                addAnonymous(obj, v);
+                continue;
+            }
+
+            p++;
         }
 
         expect(RBRACE);
         return new ObjVal(obj);
-
     }
 
-    private void putHandlingDuplicates(Map<String, Value> map, String key, Value val) {
+
+    private void addAnonymous(Map<String, Value> map, Value val) {
+        String key = "__items";
         Value existing = map.get(key);
-        if (existing != null) {
-            map.put(key, val);
+
+        if (existing == null) {
+            List<Value> list = new ArrayList<>();
+            list.add(val);
+            map.put(key, new ListVal(list));
             return;
         }
+
         if (existing instanceof ListVal lv) {
-            lv.list.add(val);
+            lv.list().add(val);
             return;
         }
+
+        // Shouldn't happen, but be safe
         List<Value> list = new ArrayList<>();
         list.add(existing);
         list.add(val);
         map.put(key, new ListVal(list));
     }
+
+
+    private void putHandlingDuplicates(Map<String, Value> map, String key, Value val) {
+        Value existing = map.get(key);
+
+        if (existing == null) {
+            map.put(key, val);
+            return;
+        }
+
+        if (existing instanceof ListVal lv) {
+            lv.list().add(val);
+            return;
+        }
+
+        List<Value> list = new ArrayList<>();
+        list.add(existing);
+        list.add(val);
+        map.put(key, new ListVal(list));
+    }
+
 
     private Token expect(Token.Type type) {
         Token t = current();

@@ -71,13 +71,15 @@ public class Tokenizer {
         }
     }
 
-    private Token readString() {
-        int start = i;
+    private Token readString() {    int start = i;
         i++;
+
         StringBuilder sb = new StringBuilder();
         while (i < s.length()) {
             char c = s.charAt(i++);
-            if (c == '\\') break;
+
+            if (c == '"') break;
+
             if (c == '\\' && i < s.length()) {
                 char next = s.charAt(i++);
                 sb.append(next);
@@ -85,6 +87,7 @@ public class Tokenizer {
                 sb.append(c);
             }
         }
+
         return new Token(STRING, sb.toString(), start);
     }
 
