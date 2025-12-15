@@ -1,9 +1,6 @@
 package com.warroom.app;
 
 import javafx.application.Application;
-import javafx.scene.Scene;
-import javafx.scene.control.Label;
-import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
 
 import javafx.concurrent.Task;
@@ -67,9 +64,6 @@ public class MainApp extends Application {
                 protected Void call() throws Exception {
                     byte[] raw = Files.readAllBytes(selectedFile.toPath());
 
-                    boolean zip = looksLikeZip(raw);
-                    boolean gzip = lookslikeGZip(raw);
-
                     byte[] contentBytes = raw;
                     String compression = "none";
 
@@ -84,16 +78,18 @@ public class MainApp extends Application {
                         return null;
                     }
 
-                    try {
-                        contentBytes = readAllBytesFromZip(raw);
-                        compression = "zip";
-                    } catch (Exception ignored) {
-
-                    }
-
-                    if ("none".equals(compression)) {
+                    if (looksLikeZip(raw)) {
                         try {
                             contentBytes = readAllBytesFromZip(raw);
+                            compression = "zip";
+                        } catch (Exception ignored) {
+
+                        }
+                    }
+
+                    if ("none".equals(compression) && lookslikeGZip(raw)) {
+                        try {
+                            contentBytes = readAllBytesFromGZip(raw);
                             compression = "gzip";
                         } catch (Exception ignored) {
 
@@ -101,6 +97,21 @@ public class MainApp extends Application {
                     }
 
                     String text = readAllToString(contentBytes);
+
+                    int limit = Math.min(text.length(), 200_000);
+                    String parseText = text.substring(0, limit);
+
+                    var tokenizer = new com.warroom.parser.Tokenizer(parseText);
+                    var tokens = tokenizer.tokenize();
+                    var root = new com.warroom.parser.ClausewitzParser(tokens).parseRoot();
+
+                    String player = getString(root, "player");
+                    String date = getString(root, "date");
+
+                    final String parseDemo =
+                            "Parsed demo:\n" +
+                                    "player = " + player + "\n" +
+                                    "date = " + date + "\n\n";
 
                     String header = preview(text, 300);
 
@@ -113,8 +124,10 @@ public class MainApp extends Application {
 
                     javafx.application.Platform.runLater(() -> {
                         logArea.appendText(msg);
+                        logArea.appendText(parseDemo);
                         statusLabel.setText("Loaded (" + finalCompression + ")");
                     });
+
 
                     return null;
                 }
@@ -122,8 +135,18 @@ public class MainApp extends Application {
 
             task.setOnFailed(ev -> {
                 Throwable ex = task.getException();
-                logArea.appendText("Error: " + (ex == null ? "Unknown error" : ex.toString()) + "\n");
-                statusLabel.setText("Load Failed");
+                javafx.application.Platform.runLater(() -> {
+                    logArea.appendText("Load FAILED:\n");
+                    if (ex != null) {
+                        logArea.appendText(ex.toString() + "\n");
+                        for (StackTraceElement ste : ex.getStackTrace()) {
+                            logArea.appendText("  at " + ste + "\n");
+                        }
+                    } else {
+                        logArea.appendText("Unknown error\n");
+                    }
+                    statusLabel.setText("Load Failed.");
+                });
             });
 
             new Thread(task, "save-loader").start();
@@ -146,6 +169,17 @@ public class MainApp extends Application {
         return new javafx.scene.control.Tab(title, label);
     }
 
+    private static String getString(
+            com.warroom.parser.ClausewitzParser.ObjVal obj,
+            String key
+    ) {
+        var v = obj.map().get(key);
+        if (v instanceof com.warroom.parser.ClausewitzParser.StrVal sv) {
+            return sv.v();
+        }
+        return v == null ? "(missing)" : v.toString();
+    }
+
     private static boolean looksLikeZip(byte[] bytes){
         return bytes.length >= 4
                 && bytes[0] == 'P' && bytes[1] == 'K'
@@ -166,7 +200,7 @@ public class MainApp extends Application {
     private static byte[] readAllBytesFromZip(byte[] zipBytes) throws IOException {
         try (ZipInputStream zis = new ZipInputStream(new BufferedInputStream(new ByteArrayInputStream(zipBytes)))){
             var entry = zis.getNextEntry();
-            if (entry == null) throw new IOException("ZIP had on entries");
+            if (entry == null) throw new IOException("ZIP had no entries");
             return readAllBytes(zis);
         }
     }
