@@ -19,6 +19,7 @@ import java.util.zip.ZipInputStream;
 public class MainApp extends Application {
     private volatile String loadedSaveText = null;
     private volatile String loadedIdeology = null;
+    private static final boolean DEBUG = false;
 
     @Override
     public void start (Stage stage) {
@@ -90,27 +91,29 @@ public class MainApp extends Application {
                     if (capital != null) sb.append("Capital State ID: ").append(String.format(java.util.Locale.US, "%.0f", capital)).append("\n");
                     if (major != null) sb.append("Major: ").append(major).append("\n");
 
-                    sb.append("\n--- Raw (top-level primitives, truncated) ---\n");
+                    if (DEBUG){
+                        sb.append("\n--- Raw (top-level primitives, truncated) ---\n");
 
-                    int shown = 0;
-                    for (var entry : countryObj.map().entrySet()) {
-                        var v = entry.getValue();
+                        int shown = 0;
+                        for (var entry : countryObj.map().entrySet()) {
+                            var v = entry.getValue();
 
-                        if (v instanceof ClausewitzParser.StrVal(String v1)) {
-                            sb.append(entry.getKey()).append(" = ").append(v1).append("\n");
-                            shown++;
-                        } else if (v instanceof ClausewitzParser.NumVal(double v1)) {
-                            sb.append(entry.getKey()).append(" = ").append(v1).append("\n");
-                            shown++;
-                        } else if (v instanceof ClausewitzParser.BoolVal(boolean v1)) {
-                            sb.append(entry.getKey()).append(" = ").append(v1).append("\n");
-                            shown++;
-                        }
+                            if (v instanceof ClausewitzParser.StrVal(String v1)) {
+                                sb.append(entry.getKey()).append(" = ").append(v1).append("\n");
+                                shown++;
+                            } else if (v instanceof ClausewitzParser.NumVal(double v1)) {
+                                sb.append(entry.getKey()).append(" = ").append(v1).append("\n");
+                                shown++;
+                            } else if (v instanceof ClausewitzParser.BoolVal(boolean v1)) {
+                                sb.append(entry.getKey()).append(" = ").append(v1).append("\n");
+                                shown++;
+                            }
 
-                        if (shown >= 80) {
-                            sb.append("…(truncated)\n");
-                            break;
-                        }
+                            if (shown >= 80) {
+                                sb.append("…(truncated)\n");
+                                break;
+                            }
+                    }
                     }
 
                     return sb.toString();
@@ -142,8 +145,9 @@ public class MainApp extends Application {
             final var selectedFile = file;
 
             statusLabel.setText("Loading save...");
-            logArea.appendText("Selected: " + file.getAbsolutePath() + "\n");
-
+            if (DEBUG){
+                logArea.appendText("Selected: " + file.getAbsolutePath() + "\n");
+            }
             Task<Void> task = new Task<>() {
                 @Override
                 protected Void call() throws Exception {
@@ -232,7 +236,6 @@ public class MainApp extends Application {
                                     "Compression: " + finalCompression + "\n" +
                                     "Text bytes: " + contentBytes.length + "\n" +
                                     "Preview:\n" + header + "\n\n";
-
                     javafx.application.Platform.runLater(() -> {
                         String playerTag = player;
                         countryBox.getItems().setAll(finalTags);
@@ -244,9 +247,10 @@ public class MainApp extends Application {
                             if (idx >= 0) countryBox.getSelectionModel().select(idx);
                             else countryBox.getSelectionModel().selectFirst();
                         }
-
-                        logArea.appendText(msg);
-                        logArea.appendText(parseDemo);
+                        if (DEBUG){
+                            logArea.appendText(msg);
+                            logArea.appendText(parseDemo);
+                        }
                         statusLabel.setText("Loaded (" + finalCompression + ") - " + finalTags.size() + " countries");
                     });
 
