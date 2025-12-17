@@ -19,6 +19,8 @@ import java.util.zip.ZipInputStream;
 public class MainApp extends Application {
     private volatile String loadedSaveText = null;
     private volatile String loadedIdeology = null;
+    private volatile String loadedDate = null;
+
     private static final boolean DEBUG = false;
 
     @Override
@@ -72,51 +74,12 @@ public class MainApp extends Application {
                     var countryObj = getObj(root, tag);
                     if (countryObj == null) return "Parsed snippet, but couldn't resolve " + tag;
 
-                    String ideology = loadedIdeology;
-                    Double stability = getNum(countryObj, "stability");
-                    Double warSupport = getNum(countryObj, "war_support");
-                    Double commandPower = getNum(countryObj, "command_power");
-                    Double researchSlots = getNum(countryObj, "research_slot");
-                    Double capital = getNum(countryObj, "capital");
-                    Boolean major = getBool(countryObj, "major");
-
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("Country: ").append(tag).append("\n");
-                    sb.append("Ideology: ").append(ideology == null ? "—" : ideology).append("\n");
-                    sb.append("Stability: ").append(pct(stability)).append("\n");
-                    sb.append("War Support: ").append(pct(warSupport)).append("\n");
-
-                    if (commandPower != null) sb.append("Command Power: ").append(String.format(java.util.Locale.US, "%.0f", commandPower)).append("\n");
-                    if (researchSlots != null) sb.append("Research Slots: ").append(String.format(java.util.Locale.US, "%.0f", researchSlots)).append("\n");
-                    if (capital != null) sb.append("Capital State ID: ").append(String.format(java.util.Locale.US, "%.0f", capital)).append("\n");
-                    if (major != null) sb.append("Major: ").append(major).append("\n");
-
-                    if (DEBUG){
-                        sb.append("\n--- Raw (top-level primitives, truncated) ---\n");
-
-                        int shown = 0;
-                        for (var entry : countryObj.map().entrySet()) {
-                            var v = entry.getValue();
-
-                            if (v instanceof ClausewitzParser.StrVal(String v1)) {
-                                sb.append(entry.getKey()).append(" = ").append(v1).append("\n");
-                                shown++;
-                            } else if (v instanceof ClausewitzParser.NumVal(double v1)) {
-                                sb.append(entry.getKey()).append(" = ").append(v1).append("\n");
-                                shown++;
-                            } else if (v instanceof ClausewitzParser.BoolVal(boolean v1)) {
-                                sb.append(entry.getKey()).append(" = ").append(v1).append("\n");
-                                shown++;
-                            }
-
-                            if (shown >= 80) {
-                                sb.append("…(truncated)\n");
-                                break;
-                            }
-                    }
-                    }
-
-                    return sb.toString();
+                    var snap = com.warroom.transform.CountryMapper.from(
+                            tag,
+                            loadedDate,
+                            countryObj
+                    );
+                    return renderCountrySnapshot(snap);
                 }
             };
 
@@ -156,20 +119,6 @@ public class MainApp extends Application {
                     byte[] contentBytes = raw;
                     String compression = "none";
 
-                    String first = new String(raw, 0, Math.min(raw.length, 16), StandardCharsets.US_ASCII);
-                    if (first.startsWith("HOI4bin")) {
-                        final String msg = """
-                                This save appears to be a BINARY HOI4 save (HOI4bin...).
-                                For now, please switch HOI4 save format to TEXT and re-save.
-                                
-                                """;
-                        javafx.application.Platform.runLater(() -> {
-                            logArea.appendText(msg);
-                            statusLabel.setText("Binary save (unsupported yet)");
-                        });
-                        return null;
-                    }
-
                     if (looksLikeZip(raw)) {
                         try {
                             contentBytes = readAllBytesFromZip(raw);
@@ -204,52 +153,27 @@ public class MainApp extends Application {
                         parseText = parseText.substring(0, lastClose + 1);
                     }
 
-                    boolean hasPlayerCountries = parseText.contains("player_countries");
-                    final boolean finalHasPlayerCountries = hasPlayerCountries;
-
                     var tokenizer = new com.warroom.parser.Tokenizer(parseText);
                     var tokens = tokenizer.tokenize();
                     var root = new com.warroom.parser.ClausewitzParser(tokens).parseRoot();
 
-                    StringBuilder keys = new StringBuilder();
-                    int count = 0;
-                    for (String k : root.map().keySet()) {
-                        if (count++ >= 40) break;
-                        keys.append(k).append(", ");
-                    }
-                    final String rootKeysPreview = keys.toString();
-
                     String player = getString(root, "player");
-                    String date = getString(root, "date");
                     String saveIdeology = getString(root, "ideology");
-
-                    final String parseDemo =
-                            "Parsed demo:\n" +
-                                    "player = " + player + "\n" +
-                                    "date = " + date + "\n\n";
-
-                    String header = preview(text, 300);
+                    String date = getString(root, "date");
 
                     final String finalCompression = compression;
-                    final String msg =
-                            "Loaded bytes: " + raw.length + "\n" +
-                                    "Compression: " + finalCompression + "\n" +
-                                    "Text bytes: " + contentBytes.length + "\n" +
-                                    "Preview:\n" + header + "\n\n";
                     javafx.application.Platform.runLater(() -> {
                         String playerTag = player;
                         countryBox.getItems().setAll(finalTags);
                         countryBox.setDisable(finalTags.isEmpty());
                         loadedIdeology = saveIdeology;
+                        loadedDate = date;
+
 
                         if (!finalTags.isEmpty()) {
                             int idx = finalTags.indexOf(playerTag);
                             if (idx >= 0) countryBox.getSelectionModel().select(idx);
                             else countryBox.getSelectionModel().selectFirst();
-                        }
-                        if (DEBUG){
-                            logArea.appendText(msg);
-                            logArea.appendText(parseDemo);
                         }
                         statusLabel.setText("Loaded (" + finalCompression + ") - " + finalTags.size() + " countries");
                     });
@@ -553,28 +477,29 @@ public class MainApp extends Application {
         return null;
     }
 
-    private static Double getNum(com.warroom.parser.ClausewitzParser.ObjVal obj, String key) {
-        var v = obj.map().get(key);
-        if (v instanceof ClausewitzParser.NumVal(double v1)) {
-            return v1;
-        }
-        return null;
-    }
-
-    private static Boolean getBool(com.warroom.parser.ClausewitzParser.ObjVal obj, String key) {
-        var v = obj.map().get(key);
-        if (v instanceof ClausewitzParser.BoolVal(boolean v1)) {
-            return v1;
-        }
-        return null;
-    }
-
     private static String pct(Double v) {
         if (v == null) {
             return "-";
         }
         return String.format(java.util.Locale.US, "%.0f%%", v * 100);
     }
+
+    private static String renderCountrySnapshot(com.warroom.model.CountrySnapshot s) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Country: ").append(s.tag()).append("\n");
+        if (s.saveDate() != null) sb.append("Save Date: ").append(s.saveDate()).append("\n");
+        if (s.ideology() != null) sb.append("Ideology: ").append(s.ideology()).append("\n");
+        if (s.rulingParty() != null) sb.append("Ruling Party: ").append(s.rulingParty()).append("\n");
+        if (s.politicalPower() != null) sb.append("Political Power: ").append(String.format(java.util.Locale.US, "%.1f", s.politicalPower())).append("\n");
+        if (s.stability() != null) sb.append("Stability: ").append(pct(s.stability())).append("\n");
+        if (s.warSupport() != null) sb.append("War Support: ").append(pct(s.warSupport())).append("\n");
+        if (s.commandPower() != null) sb.append("Command Power: ").append(String.format(java.util.Locale.US, "%.2f", s.commandPower())).append("\n");
+        if (s.researchSlots() != null) sb.append("Research Slots: ").append(String.format(java.util.Locale.US, "%.0f", s.researchSlots())).append("\n");
+        if (s.capitalStateId() != null) sb.append("Capital State ID: ").append(String.format(java.util.Locale.US, "%.0f", s.capitalStateId())).append("\n");
+        if (s.major() != null) sb.append("Major: ").append(s.major()).append("\n");
+        return sb.toString();
+    }
+
     public static void main(String[] args) {
         launch(args);
     }
