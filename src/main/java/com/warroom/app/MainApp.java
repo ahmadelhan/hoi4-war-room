@@ -18,6 +18,7 @@ import java.util.zip.ZipInputStream;
 
 public class MainApp extends Application {
     private volatile String loadedSaveText = null;
+    private volatile String loadedIdeology = null;
 
     @Override
     public void start (Stage stage) {
@@ -54,58 +55,74 @@ public class MainApp extends Application {
         countryBox.setOnAction(ev -> {
             String tag = countryBox.getValue();
             String text = loadedSaveText;
+            if (tag == null || text == null) return;
 
             overviewArea.setText("Loading " + tag + "...");
 
             Task<String> t = new Task<>() {
                 @Override
-                protected String call() throws Exception {
+                protected String call() {
                     String snippet = extractSingleCountrySnippet(text, tag);
-                    if (snippet == null) {
-                        return "Could not find country block for " + tag;
-                    }
+                    if (snippet == null) return "Could not find country block for " + tag;
 
                     var tokens = new com.warroom.parser.Tokenizer(snippet).tokenize();
                     var root = new com.warroom.parser.ClausewitzParser(tokens).parseRoot();
+
                     var countryObj = getObj(root, tag);
-                    if (countryObj == null) {
-                        return "Parsed snippet, but could not resolve " + tag;
-                    }
+                    if (countryObj == null) return "Parsed snippet, but couldn't resolve " + tag;
+
+                    String ideology = loadedIdeology;
+                    Double stability = getNum(countryObj, "stability");
+                    Double warSupport = getNum(countryObj, "war_support");
+                    Double commandPower = getNum(countryObj, "command_power");
+                    Double researchSlots = getNum(countryObj, "research_slot");
+                    Double capital = getNum(countryObj, "capital");
+                    Boolean major = getBool(countryObj, "major");
 
                     StringBuilder sb = new StringBuilder();
-                    sb.append("Country: ").append(tag).append("\n\n");
+                    sb.append("Country: ").append(tag).append("\n");
+                    sb.append("Ideology: ").append(ideology == null ? "—" : ideology).append("\n");
+                    sb.append("Stability: ").append(pct(stability)).append("\n");
+                    sb.append("War Support: ").append(pct(warSupport)).append("\n");
+
+                    if (commandPower != null) sb.append("Command Power: ").append(String.format(java.util.Locale.US, "%.0f", commandPower)).append("\n");
+                    if (researchSlots != null) sb.append("Research Slots: ").append(String.format(java.util.Locale.US, "%.0f", researchSlots)).append("\n");
+                    if (capital != null) sb.append("Capital State ID: ").append(String.format(java.util.Locale.US, "%.0f", capital)).append("\n");
+                    if (major != null) sb.append("Major: ").append(major).append("\n");
+
+                    sb.append("\n--- Raw (top-level primitives, truncated) ---\n");
 
                     int shown = 0;
                     for (var entry : countryObj.map().entrySet()) {
                         var v = entry.getValue();
-                        if (v instanceof ClausewitzParser.StrVal sv) {
-                            sb.append(entry.getKey()).append(" = ").append(sv.v()).append("\n");
+
+                        if (v instanceof ClausewitzParser.StrVal(String v1)) {
+                            sb.append(entry.getKey()).append(" = ").append(v1).append("\n");
                             shown++;
-                        } else if (v instanceof ClausewitzParser.NumVal nv) {
-                            sb.append(entry.getKey()).append(" = ").append(nv.v()).append("\n");
+                        } else if (v instanceof ClausewitzParser.NumVal(double v1)) {
+                            sb.append(entry.getKey()).append(" = ").append(v1).append("\n");
                             shown++;
-                        } else if (v instanceof ClausewitzParser.BoolVal bv) {
-                            sb.append(entry.getKey()).append(" = ").append(bv.v()).append("\n");
+                        } else if (v instanceof ClausewitzParser.BoolVal(boolean v1)) {
+                            sb.append(entry.getKey()).append(" = ").append(v1).append("\n");
                             shown++;
                         }
 
-                        if (shown >= 60) {
-                            sb.append("\n...truncated\n");
+                        if (shown >= 80) {
+                            sb.append("…(truncated)\n");
                             break;
                         }
                     }
 
-                    if (shown == 0) {
-                        sb.append("(No primitive fields found at top level. Nested data exists.)\n");
-                    }
                     return sb.toString();
                 }
             };
+
             t.setOnSucceeded(e2 -> overviewArea.setText(t.getValue()));
             t.setOnFailed(e2 -> overviewArea.setText("Failed to load " + tag + ":\n" + t.getException()));
 
             new Thread(t, "country-loader").start();
         });
+
 
 
 
@@ -200,6 +217,7 @@ public class MainApp extends Application {
 
                     String player = getString(root, "player");
                     String date = getString(root, "date");
+                    String saveIdeology = getString(root, "ideology");
 
                     final String parseDemo =
                             "Parsed demo:\n" +
@@ -219,6 +237,7 @@ public class MainApp extends Application {
                         String playerTag = player;
                         countryBox.getItems().setAll(finalTags);
                         countryBox.setDisable(finalTags.isEmpty());
+                        loadedIdeology = saveIdeology;
 
                         if (!finalTags.isEmpty()) {
                             int idx = finalTags.indexOf(playerTag);
@@ -266,7 +285,6 @@ public class MainApp extends Application {
         stage.show();
     }
 
-
     private javafx.scene.control.Tab makeTab(String title) {
         var label = new javafx.scene.control.Label(title + " (not loaded)");
         label.setPadding(new javafx.geometry.Insets(10));
@@ -282,14 +300,13 @@ public class MainApp extends Application {
         return null;
     }
 
-
     private static String getString(
             com.warroom.parser.ClausewitzParser.ObjVal obj,
             String key
     ) {
         var v = obj.map().get(key);
-        if (v instanceof com.warroom.parser.ClausewitzParser.StrVal sv) {
-            return sv.v();
+        if (v instanceof ClausewitzParser.StrVal(String v1)) {
+            return v1;
         }
         return v == null ? "(missing)" : v.toString();
     }
@@ -532,6 +549,28 @@ public class MainApp extends Application {
         return null;
     }
 
+    private static Double getNum(com.warroom.parser.ClausewitzParser.ObjVal obj, String key) {
+        var v = obj.map().get(key);
+        if (v instanceof ClausewitzParser.NumVal(double v1)) {
+            return v1;
+        }
+        return null;
+    }
+
+    private static Boolean getBool(com.warroom.parser.ClausewitzParser.ObjVal obj, String key) {
+        var v = obj.map().get(key);
+        if (v instanceof ClausewitzParser.BoolVal(boolean v1)) {
+            return v1;
+        }
+        return null;
+    }
+
+    private static String pct(Double v) {
+        if (v == null) {
+            return "-";
+        }
+        return String.format(java.util.Locale.US, "%.0f%%", v * 100);
+    }
     public static void main(String[] args) {
         launch(args);
     }
