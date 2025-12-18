@@ -23,18 +23,18 @@ public class ClausewitzParser {
 
     public ObjVal parseRoot() {
         Map<String, Value> root = new LinkedHashMap<>();
+
         while (!peek(EOF)) {
-            if (peek(IDENT) && peekNext(EQUALS) == false) {
-                p++;
+            if ((peek(IDENT) || peek(NUMBER)) && peekNext(EQUALS)) {
+                String key = peek(IDENT) ? expect(IDENT).text() : expect(NUMBER).text();
+                expect(EQUALS);
+                Value val = parseValue();
+                putHandlingDuplicates(root, key, val);
                 continue;
             }
-
-            String key = expect(IDENT).text();
-            expect(EQUALS);
-            Value val = parseValue();
-
-            putHandlingDuplicates(root, key, val);
+            p++;
         }
+
         return new ObjVal(root);
     }
 
@@ -57,27 +57,15 @@ public class ClausewitzParser {
 
         while (!peek(RBRACE)) {
 
-            if (peek(LBRACE)) {
-                Value v = parseValue();
-                addAnonymous(obj, v);
+            if ((peek(IDENT) || peek(NUMBER)) && peekNext(EQUALS)) {
+                String key = peek(IDENT) ? expect(IDENT).text() : expect(NUMBER).text();
+                expect(EQUALS);
+                Value val = parseValue();
+                putHandlingDuplicates(obj, key, val);
                 continue;
             }
 
-            if (peek(NUMBER) || peek(STRING)) {
-                Value v = parseValue();
-                addAnonymous(obj, v);
-                continue;
-            }
-
-            if (peek(IDENT)) {
-                if (peekNext(EQUALS)) {
-                    String key = expect(IDENT).text();
-                    expect(EQUALS);
-                    Value val = parseValue();
-                    putHandlingDuplicates(obj, key, val);
-                    continue;
-                }
-
+            if (peek(LBRACE) || peek(STRING) || peek(NUMBER) || peek(IDENT)) {
                 Value v = parseValue();
                 addAnonymous(obj, v);
                 continue;

@@ -20,6 +20,8 @@ public class MainApp extends Application {
     private volatile String loadedSaveText = null;
     private volatile String loadedIdeology = null;
     private volatile String loadedDate = null;
+    private java.util.Map<String, String> divisionTemplateNames = java.util.Map.of();
+
 
     private static final boolean DEBUG = false;
 
@@ -37,16 +39,43 @@ public class MainApp extends Application {
         var topRow = new javafx.scene.layout.HBox(10, openBtn, countryBox, statusLabel);
         topRow.setPadding(new javafx.geometry.Insets(10));
 
-        var overviewArea = new javafx.scene.control.TextArea();
-        overviewArea.setEditable(false);
-        overviewArea.setWrapText(false);
-        overviewArea.setText("Load a save, then select a country.");
+        var overviewTable = new javafx.scene.control.TableView<OverviewRow>();
+        overviewTable.setColumnResizePolicy(javafx.scene.control.TableView.CONSTRAINED_RESIZE_POLICY);
+
+        var statCol = new javafx.scene.control.TableColumn<OverviewRow, String>("Stat");
+        statCol.setCellValueFactory(cell ->
+                new javafx.beans.property.ReadOnlyStringWrapper(cell.getValue().stat())
+        );
+
+        var valueCol = new javafx.scene.control.TableColumn<OverviewRow, String>("Value");
+        valueCol.setCellValueFactory(cell ->
+                new javafx.beans.property.ReadOnlyStringWrapper(cell.getValue().value())
+        );
+
+        overviewTable.getColumns().addAll(statCol, valueCol);
+        overviewTable.setPlaceholder(new javafx.scene.control.Label("Load a save, then select a country."));
+
+        var divisionsTable = new javafx.scene.control.TableView<DivisionRow>();
+        divisionsTable.setColumnResizePolicy(javafx.scene.control.TableView.CONSTRAINED_RESIZE_POLICY);
+
+        var tmplCol = new javafx.scene.control.TableColumn<DivisionRow, String>("Template");
+        tmplCol.setCellValueFactory(cell ->
+                new javafx.beans.property.ReadOnlyStringWrapper(cell.getValue().template())
+        );
+
+        var cntCol = new javafx.scene.control.TableColumn<DivisionRow, String>("#Divisions");
+        cntCol.setCellValueFactory(cell ->
+                new javafx.beans.property.ReadOnlyStringWrapper(cell.getValue().count())
+        );
+
+        divisionsTable.getColumns().addAll(tmplCol, cntCol);
+        divisionsTable.setPlaceholder(new javafx.scene.control.Label("Load a save, then select a country."));
 
         var tabs = new javafx.scene.control.TabPane();
-        var overviewTab = new javafx.scene.control.Tab("Overview", overviewArea);
+        var overviewTab = new javafx.scene.control.Tab("Overview", overviewTable);
         tabs.getTabs().add(overviewTab);
         tabs.getTabs().add(makeTab("Stockpiles"));
-        tabs.getTabs().add(makeTab("Divisions"));
+        tabs.getTabs().add(new javafx.scene.control.Tab("Divisions", divisionsTable));
         tabs.getTabs().add(makeTab("Wars"));
         tabs.setTabClosingPolicy(javafx.scene.control.TabPane.TabClosingPolicy.UNAVAILABLE);
 
@@ -60,37 +89,55 @@ public class MainApp extends Application {
             String text = loadedSaveText;
             if (tag == null || text == null) return;
 
-            overviewArea.setText("Loading " + tag + "...");
+            overviewTable.setItems(javafx.collections.FXCollections.observableArrayList(
+                    new OverviewRow("Status", "Loading " + tag + "...")
+            ));
 
-            Task<String> t = new Task<>() {
+            divisionsTable.setItems(javafx.collections.FXCollections.observableArrayList(
+                    new DivisionRow("Status", "Loading " + tag + "...")
+            ));
+
+            Task<com.warroom.model.CountrySnapshot> t = new Task<>() {
                 @Override
-                protected String call() {
+                protected com.warroom.model.CountrySnapshot call() {
                     String snippet = extractSingleCountrySnippet(text, tag);
-                    if (snippet == null) return "Could not find country block for " + tag;
+                    if (snippet == null) return null;
 
                     var tokens = new com.warroom.parser.Tokenizer(snippet).tokenize();
                     var root = new com.warroom.parser.ClausewitzParser(tokens).parseRoot();
 
                     var countryObj = getObj(root, tag);
-                    if (countryObj == null) return "Parsed snippet, but couldn't resolve " + tag;
+                    if (countryObj == null) return null;
 
-                    var snap = com.warroom.transform.CountryMapper.from(
+                    return com.warroom.transform.CountryMapper.from(
                             tag,
                             loadedDate,
-                            countryObj
+                            countryObj,
+                            divisionTemplateNames
                     );
-                    return renderCountrySnapshot(snap);
                 }
             };
 
-            t.setOnSucceeded(e2 -> overviewArea.setText(t.getValue()));
-            t.setOnFailed(e2 -> overviewArea.setText("Failed to load " + tag + ":\n" + t.getException()));
+
+            t.setOnSucceeded(e2 -> {
+                var snap = t.getValue();
+                if (snap == null) {
+                    overviewTable.setItems(javafx.collections.FXCollections.observableArrayList(
+                            new OverviewRow("Error", "Could not load data for " + tag)
+                    ));
+                    return;
+                }
+                overviewTable.setItems(buildOverviewRows(snap));
+                divisionsTable.setItems(buildDivisionRows(snap));
+            });
+
+            t.setOnFailed(e2 -> overviewTable.setItems(javafx.collections.FXCollections.observableArrayList(
+                    new OverviewRow("Failed", String.valueOf(t.getException()))
+            )));
+
 
             new Thread(t, "country-loader").start();
         });
-
-
-
 
         openBtn.setOnAction(e -> {
             FileChooser chooser = new FileChooser();
@@ -138,6 +185,7 @@ public class MainApp extends Application {
                     }
 
                     String text = readAllToString(contentBytes);
+                    var templateNames = extractDivisionTemplateNames(text);
 
                     final String finalText = text;
                     javafx.application.Platform.runLater(() -> loadedSaveText = finalText);
@@ -168,7 +216,7 @@ public class MainApp extends Application {
                         countryBox.setDisable(finalTags.isEmpty());
                         loadedIdeology = saveIdeology;
                         loadedDate = date;
-
+                        divisionTemplateNames = templateNames;
 
                         if (!finalTags.isEmpty()) {
                             int idx = finalTags.indexOf(playerTag);
@@ -219,6 +267,10 @@ public class MainApp extends Application {
         return new javafx.scene.control.Tab(title, label);
     }
 
+    private record OverviewRow(String stat, String value) {}
+
+    private record DivisionRow(String template, String count) {}
+
     private static com.warroom.parser.ClausewitzParser.ObjVal getObj(
             com.warroom.parser.ClausewitzParser.ObjVal obj,
             String key
@@ -233,10 +285,12 @@ public class MainApp extends Application {
             String key
     ) {
         var v = obj.map().get(key);
-        if (v instanceof ClausewitzParser.StrVal(String v1)) {
-            return v1;
-        }
-        return v == null ? "(missing)" : v.toString();
+
+        if (v instanceof com.warroom.parser.ClausewitzParser.StrVal sv) return sv.v();
+        if (v instanceof com.warroom.parser.ClausewitzParser.NumVal nv) return String.format(java.util.Locale.US, "%s", nv.v());
+        if (v instanceof com.warroom.parser.ClausewitzParser.BoolVal bv) return String.valueOf(bv.v());
+
+        return null;
     }
 
     private static boolean looksLikeZip(byte[] bytes){
@@ -251,6 +305,80 @@ public class MainApp extends Application {
                 && (bytes[0] == (byte) 0x1F)
                 && (bytes[1] == (byte) 0x8B);
     }
+
+    private static String safe(String s) {
+        return (s == null || s.isBlank()) ? "(not found)" : s;
+    }
+
+    private static String fmtWhole(Double d) {
+        if (d == null) return "(not found)";
+        return String.format(java.util.Locale.US, "%.0f", d);
+    }
+
+    private static String fmt1(Double d) {
+        if (d == null) return "(not found)";
+        return String.format(java.util.Locale.US, "%.1f", d);
+    }
+
+    private static String fmt2(Double d) {
+        if (d == null) return "(not found)";
+        return String.format(java.util.Locale.US, "%.2f", d);
+    }
+
+    private static String fmtPct(Double d) {
+        if (d == null) return "(not found)";
+        // Saves sometimes store as 0..1, sometimes as 0..100. We normalize gently.
+        double v = d;
+        if (v <= 1.0) v = v * 100.0;
+        return String.format(java.util.Locale.US, "%.1f%%", v);
+    }
+
+
+    private static javafx.collections.ObservableList<OverviewRow> buildOverviewRows(com.warroom.model.CountrySnapshot s) {
+        var rows = javafx.collections.FXCollections.<OverviewRow>observableArrayList();
+
+        rows.add(new OverviewRow("Country", safe(s.tag())));
+        rows.add(new OverviewRow("Save Date", safe(s.saveDate())));
+
+        rows.add(new OverviewRow("Manpower", fmtWhole(s.manpower())));
+
+        rows.add(new OverviewRow("Civilian Factories", fmtWhole(s.civilianFactories())));
+        rows.add(new OverviewRow("Military Factories", fmtWhole(s.militaryFactories())));
+        rows.add(new OverviewRow("Dockyards", fmtWhole(s.dockyards())));
+
+        rows.add(new OverviewRow("Stability", fmtPct(s.stability())));
+        rows.add(new OverviewRow("War Support", fmtPct(s.warSupport())));
+
+        rows.add(new OverviewRow("Ruling Party", safe(s.rulingParty())));
+        rows.add(new OverviewRow("Political Power", fmt1(s.politicalPower())));
+        rows.add(new OverviewRow("Command Power", fmt2(s.commandPower())));
+        rows.add(new OverviewRow("Research Slots", fmtWhole(s.researchSlots())));
+        rows.add(new OverviewRow("Capital State ID", fmtWhole(s.capitalStateId())));
+        rows.add(new OverviewRow("Major", s.major() == null ? "(unknown)" : String.valueOf(s.major())));
+
+        return rows;
+    }
+
+    private static javafx.collections.ObservableList<DivisionRow> buildDivisionRows(com.warroom.model.CountrySnapshot s) {
+        var rows = javafx.collections.FXCollections.<DivisionRow>observableArrayList();
+
+        var map = s.divisionsByTemplate();
+        if (map == null || map.isEmpty()) {
+            rows.add(new DivisionRow("(none found)", "0"));
+            return rows;
+        }
+
+        // Sort by count desc
+        var list = new java.util.ArrayList<>(map.entrySet());
+        list.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
+
+        for (var e : list) {
+            rows.add(new DivisionRow(e.getKey(), String.valueOf(e.getValue())));
+        }
+
+        return rows;
+    }
+
 
     private static String readAllToString(byte[] bytes){
         return new String(bytes, StandardCharsets.UTF_8);
@@ -285,6 +413,8 @@ public class MainApp extends Application {
         s  = s.replace("\u0000", "");
         return s.length() <= maxChars ? s : s.substring(0, maxChars);
     }
+
+
 
     private static java.util.List<String> extractCountryTagsFromCountryBlock(String text) {
         int idx = indexOfCountriesKey(text);
@@ -477,28 +607,83 @@ public class MainApp extends Application {
         return null;
     }
 
-    private static String pct(Double v) {
-        if (v == null) {
-            return "-";
+    private static java.util.Map<String, String> extractDivisionTemplateNames(String fullText) {
+        String snippet = extractTopLevelKeyBlock(fullText, "division_templates");
+        if (snippet == null) return java.util.Map.of();
+
+        var tokens = new com.warroom.parser.Tokenizer(snippet).tokenize();
+        var root = new com.warroom.parser.ClausewitzParser(tokens).parseRoot();
+
+        var divTemps = getObj(root, "division_templates");
+        if (divTemps == null) return java.util.Map.of();
+
+        var v = divTemps.map().get("division_template");
+        if (v == null) return java.util.Map.of();
+
+        java.util.Map<String, String> out = new java.util.HashMap<>();
+
+        if (v instanceof com.warroom.parser.ClausewitzParser.ObjVal one) {
+            addTemplateFromObj(one, out);
+        } else if (v instanceof com.warroom.parser.ClausewitzParser.ListVal many) {
+            for (var item : many.list()) {
+                if (item instanceof com.warroom.parser.ClausewitzParser.ObjVal obj) {
+                    addTemplateFromObj(obj, out);
+                }
+            }
         }
-        return String.format(java.util.Locale.US, "%.0f%%", v * 100);
+        return out;
     }
 
-    private static String renderCountrySnapshot(com.warroom.model.CountrySnapshot s) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Country: ").append(s.tag()).append("\n");
-        if (s.saveDate() != null) sb.append("Save Date: ").append(s.saveDate()).append("\n");
-        if (s.ideology() != null) sb.append("Ideology: ").append(s.ideology()).append("\n");
-        if (s.rulingParty() != null) sb.append("Ruling Party: ").append(s.rulingParty()).append("\n");
-        if (s.politicalPower() != null) sb.append("Political Power: ").append(String.format(java.util.Locale.US, "%.1f", s.politicalPower())).append("\n");
-        if (s.stability() != null) sb.append("Stability: ").append(pct(s.stability())).append("\n");
-        if (s.warSupport() != null) sb.append("War Support: ").append(pct(s.warSupport())).append("\n");
-        if (s.commandPower() != null) sb.append("Command Power: ").append(String.format(java.util.Locale.US, "%.2f", s.commandPower())).append("\n");
-        if (s.researchSlots() != null) sb.append("Research Slots: ").append(String.format(java.util.Locale.US, "%.0f", s.researchSlots())).append("\n");
-        if (s.capitalStateId() != null) sb.append("Capital State ID: ").append(String.format(java.util.Locale.US, "%.0f", s.capitalStateId())).append("\n");
-        if (s.major() != null) sb.append("Major: ").append(s.major()).append("\n");
-        return sb.toString();
+    private static void addTemplateFromObj(com.warroom.parser.ClausewitzParser.ObjVal templateObj,
+                                           java.util.Map<String, String> out) {
+        String name = getString(templateObj, "name");
+        String id = extractIdFromIdBlock(templateObj.map().get("id")); // id={ id=1 type=52 }
+        if (id != null && name != null) out.put(id, name);
     }
+
+    private static String extractIdFromIdBlock(com.warroom.parser.ClausewitzParser.Value v) {
+        if (!(v instanceof com.warroom.parser.ClausewitzParser.ObjVal obj)) return null;
+        var inner = obj.map().get("id");
+        if (inner instanceof com.warroom.parser.ClausewitzParser.NumVal nv) {
+            return String.format(java.util.Locale.US, "%.0f", nv.v());
+        }
+        return null;
+    }
+
+    private static String extractTopLevelKeyBlock(String fullText, String key) {
+        int idx = fullText.indexOf("\n" + key + "=");
+        if (idx < 0) idx = fullText.indexOf(key + "=");
+        if (idx < 0) return null;
+
+        int eq = fullText.indexOf('=', idx);
+        if (eq < 0) return null;
+
+        int open = -1;
+        for (int i = eq + 1; i < fullText.length(); i++) {
+            char c = fullText.charAt(i);
+            if (c == '{') { open = i; break; }
+            if (!Character.isWhitespace(c)) return null;
+        }
+        if (open < 0) return null;
+
+        boolean inString = false;
+        int depth = 0;
+        for (int i = open; i < fullText.length(); i++) {
+            char c = fullText.charAt(i);
+            if (c == '"' && (i == 0 || fullText.charAt(i - 1) != '\\')) inString = !inString;
+            if (inString) continue;
+
+            if (c == '{') depth++;
+            else if (c == '}') {
+                depth--;
+                if (depth == 0) {
+                    return key + "=" + fullText.substring(open, i + 1);
+                }
+            }
+        }
+        return null;
+    }
+
 
     public static void main(String[] args) {
         launch(args);
