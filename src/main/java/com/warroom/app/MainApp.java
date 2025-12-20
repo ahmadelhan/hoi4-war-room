@@ -1,4 +1,5 @@
 package com.warroom.app;
+import com.warroom.parser.Clausewitz;
 
 import com.warroom.parser.ClausewitzParser;
 import javafx.application.Application;
@@ -106,8 +107,12 @@ public class MainApp extends Application {
                     var tokens = new com.warroom.parser.Tokenizer(snippet).tokenize();
                     var root = new com.warroom.parser.ClausewitzParser(tokens).parseRoot();
 
-                    var countryObj = getObj(root, tag);
+                    var countryObj = Clausewitz.get(root, tag)
+                            .flatMap(Clausewitz::obj)
+                            .orElse(null);
+
                     if (countryObj == null) return null;
+
 
                     return com.warroom.transform.CountryMapper.from(
                             tag,
@@ -205,9 +210,9 @@ public class MainApp extends Application {
                     var tokens = tokenizer.tokenize();
                     var root = new com.warroom.parser.ClausewitzParser(tokens).parseRoot();
 
-                    String player = getString(root, "player");
-                    String saveIdeology = getString(root, "ideology");
-                    String date = getString(root, "date");
+                    String player = Clausewitz.get(root, "player").flatMap(Clausewitz::str).orElse(null);
+                    String saveIdeology = Clausewitz.get(root, "ideology").flatMap(Clausewitz::str).orElse(null);
+                    String date = Clausewitz.get(root, "date").flatMap(Clausewitz::str).orElse(null);
 
                     final String finalCompression = compression;
                     javafx.application.Platform.runLater(() -> {
@@ -270,28 +275,6 @@ public class MainApp extends Application {
     private record OverviewRow(String stat, String value) {}
 
     private record DivisionRow(String template, String count) {}
-
-    private static com.warroom.parser.ClausewitzParser.ObjVal getObj(
-            com.warroom.parser.ClausewitzParser.ObjVal obj,
-            String key
-    ) {
-        var v = obj.map().get(key);
-        if (v instanceof com.warroom.parser.ClausewitzParser.ObjVal ov) return ov;
-        return null;
-    }
-
-    private static String getString(
-            com.warroom.parser.ClausewitzParser.ObjVal obj,
-            String key
-    ) {
-        var v = obj.map().get(key);
-
-        if (v instanceof com.warroom.parser.ClausewitzParser.StrVal sv) return sv.v();
-        if (v instanceof com.warroom.parser.ClausewitzParser.NumVal nv) return String.format(java.util.Locale.US, "%s", nv.v());
-        if (v instanceof com.warroom.parser.ClausewitzParser.BoolVal bv) return String.valueOf(bv.v());
-
-        return null;
-    }
 
     private static boolean looksLikeZip(byte[] bytes){
         return bytes.length >= 4
@@ -614,8 +597,11 @@ public class MainApp extends Application {
         var tokens = new com.warroom.parser.Tokenizer(snippet).tokenize();
         var root = new com.warroom.parser.ClausewitzParser(tokens).parseRoot();
 
-        var divTemps = getObj(root, "division_templates");
+        var divTemps = Clausewitz.get(root, "division_templates")
+                .flatMap(Clausewitz::obj)
+                .orElse(null);
         if (divTemps == null) return java.util.Map.of();
+
 
         var v = divTemps.map().get("division_template");
         if (v == null) return java.util.Map.of();
@@ -636,7 +622,7 @@ public class MainApp extends Application {
 
     private static void addTemplateFromObj(com.warroom.parser.ClausewitzParser.ObjVal templateObj,
                                            java.util.Map<String, String> out) {
-        String name = getString(templateObj, "name");
+        String name = Clausewitz.get(templateObj, "name").flatMap(Clausewitz::str).orElse(null);
         String id = extractIdFromIdBlock(templateObj.map().get("id")); // id={ id=1 type=52 }
         if (id != null && name != null) out.put(id, name);
     }

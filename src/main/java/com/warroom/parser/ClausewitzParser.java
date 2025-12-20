@@ -28,13 +28,15 @@ public class ClausewitzParser {
             if ((peek(IDENT) || peek(NUMBER)) && peekNext(EQUALS)) {
                 String key = peek(IDENT) ? expect(IDENT).text() : expect(NUMBER).text();
                 expect(EQUALS);
-                Value val = parseValue();
-                putHandlingDuplicates(root, key, val);
+                try {
+                    Value val = parseValue();
+                    putHandlingDuplicates(root, key, val);
+                } catch (RuntimeException ex) {
+                }
                 continue;
             }
             p++;
         }
-
         return new ObjVal(root);
     }
 
@@ -60,19 +62,28 @@ public class ClausewitzParser {
             if ((peek(IDENT) || peek(NUMBER)) && peekNext(EQUALS)) {
                 String key = peek(IDENT) ? expect(IDENT).text() : expect(NUMBER).text();
                 expect(EQUALS);
-                Value val = parseValue();
-                putHandlingDuplicates(obj, key, val);
+                try {
+                    Value val = parseValue();
+                    putHandlingDuplicates(obj, key, val);
+                } catch (RuntimeException ex) {
+                }
                 continue;
             }
 
             if (peek(LBRACE) || peek(STRING) || peek(NUMBER) || peek(IDENT)) {
-                Value v = parseValue();
-                addAnonymous(obj, v);
+                try {
+                    Value v = parseValue();
+                    addAnonymous(obj, v);
+                } catch (RuntimeException ex) {
+                    p++;
+                }
                 continue;
             }
 
             p++;
         }
+
+
 
         expect(RBRACE);
         return new ObjVal(obj);

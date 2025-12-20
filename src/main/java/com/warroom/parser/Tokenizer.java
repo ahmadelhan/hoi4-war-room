@@ -71,7 +71,8 @@ public class Tokenizer {
         }
     }
 
-    private Token readString() {    int start = i;
+    private Token readString() {
+        int start = i;
         i++;
 
         StringBuilder sb = new StringBuilder();
