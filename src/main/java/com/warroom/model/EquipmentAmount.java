@@ -1,7 +1,6 @@
 package com.warroom.model;
 
 public record EquipmentAmount(
-        String equipmentType,
+        String equipment,
         Double amount
-) {
-}
+) {}

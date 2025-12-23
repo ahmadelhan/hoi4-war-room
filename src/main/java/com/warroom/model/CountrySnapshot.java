@@ -1,5 +1,6 @@
 package com.warroom.model;
 
+import java.util.List;
 import java.util.Map;
 
 public record CountrySnapshot(
@@ -21,5 +22,7 @@ public record CountrySnapshot(
         Double capitalStateId,
         Boolean major,
 
-        Map<String, Integer> divisionsByTemplate
-) { }
+        Map<String, Integer> divisionsByTemplate,
+        List<EquipmentAmount> stockpilesTop10
+
+        ) { }

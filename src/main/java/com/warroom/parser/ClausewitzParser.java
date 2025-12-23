@@ -66,6 +66,7 @@ public class ClausewitzParser {
                     Value val = parseValue();
                     putHandlingDuplicates(obj, key, val);
                 } catch (RuntimeException ex) {
+                    p++;
                 }
                 continue;
             }

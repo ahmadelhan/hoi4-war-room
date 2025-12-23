@@ -1,7 +1,6 @@
 package com.warroom.app;
 import com.warroom.parser.Clausewitz;
 
-import com.warroom.parser.ClausewitzParser;
 import javafx.application.Application;
 import javafx.stage.Stage;
 
@@ -22,7 +21,9 @@ public class MainApp extends Application {
     private volatile String loadedIdeology = null;
     private volatile String loadedDate = null;
     private java.util.Map<String, String> divisionTemplateNames = java.util.Map.of();
-
+    private java.util.Map<String, String> equipmentIdToName = java.util.Map.of();
+    private javafx.scene.control.TextArea logArea;
+    private javafx.scene.control.Button smokeBtn;
 
     private static final boolean DEBUG = false;
 
@@ -32,12 +33,15 @@ public class MainApp extends Application {
         var openBtn = new javafx.scene.control.Button("Open a Save");
         var countryBox = new javafx.scene.control.ComboBox<String>();
 
+        smokeBtn = new javafx.scene.control.Button("Smoke Test");
+        smokeBtn.setDisable(true);
+
         countryBox.setDisable(true);
         countryBox.setPromptText("Select a Country...");
 
         var statusLabel = new javafx.scene.control.Label("No Save Loaded");
 
-        var topRow = new javafx.scene.layout.HBox(10, openBtn, countryBox, statusLabel);
+        var topRow = new javafx.scene.layout.HBox(10, openBtn, smokeBtn,countryBox, statusLabel);
         topRow.setPadding(new javafx.geometry.Insets(10));
 
         var overviewTable = new javafx.scene.control.TableView<OverviewRow>();
@@ -59,6 +63,22 @@ public class MainApp extends Application {
         var divisionsTable = new javafx.scene.control.TableView<DivisionRow>();
         divisionsTable.setColumnResizePolicy(javafx.scene.control.TableView.CONSTRAINED_RESIZE_POLICY);
 
+        var stockpilesTable = new javafx.scene.control.TableView<StockpileRow>();
+        stockpilesTable.setColumnResizePolicy(javafx.scene.control.TableView.CONSTRAINED_RESIZE_POLICY);
+
+        var eqCol = new javafx.scene.control.TableColumn<StockpileRow, String>("Equipment");
+        eqCol.setCellValueFactory(cell ->
+                new javafx.beans.property.ReadOnlyStringWrapper(cell.getValue().equipment())
+        );
+
+        var amtCol = new javafx.scene.control.TableColumn<StockpileRow, String>("Amount");
+        amtCol.setCellValueFactory(cell ->
+                new javafx.beans.property.ReadOnlyStringWrapper(cell.getValue().amount())
+        );
+
+        stockpilesTable.getColumns().addAll(eqCol, amtCol);
+        stockpilesTable.setPlaceholder(new javafx.scene.control.Label("Load a save, then select a country."));
+
         var tmplCol = new javafx.scene.control.TableColumn<DivisionRow, String>("Template");
         tmplCol.setCellValueFactory(cell ->
                 new javafx.beans.property.ReadOnlyStringWrapper(cell.getValue().template())
@@ -75,12 +95,12 @@ public class MainApp extends Application {
         var tabs = new javafx.scene.control.TabPane();
         var overviewTab = new javafx.scene.control.Tab("Overview", overviewTable);
         tabs.getTabs().add(overviewTab);
-        tabs.getTabs().add(makeTab("Stockpiles"));
+        tabs.getTabs().add(new javafx.scene.control.Tab("Stockpiles", stockpilesTable));
         tabs.getTabs().add(new javafx.scene.control.Tab("Divisions", divisionsTable));
         tabs.getTabs().add(makeTab("Wars"));
         tabs.setTabClosingPolicy(javafx.scene.control.TabPane.TabClosingPolicy.UNAVAILABLE);
 
-        var logArea = new javafx.scene.control.TextArea();
+        logArea = new javafx.scene.control.TextArea();
         logArea.setEditable(false);
         logArea.setPrefRowCount(6);
         logArea.appendText("War Room initialised.\n");
@@ -96,6 +116,10 @@ public class MainApp extends Application {
 
             divisionsTable.setItems(javafx.collections.FXCollections.observableArrayList(
                     new DivisionRow("Status", "Loading " + tag + "...")
+            ));
+
+            stockpilesTable.setItems(javafx.collections.FXCollections.observableArrayList(
+                    new StockpileRow("Status", "Loading " + tag + "...")
             ));
 
             Task<com.warroom.model.CountrySnapshot> t = new Task<>() {
@@ -118,7 +142,9 @@ public class MainApp extends Application {
                             tag,
                             loadedDate,
                             countryObj,
-                            divisionTemplateNames
+                            divisionTemplateNames,
+                            equipmentIdToName
+
                     );
                 }
             };
@@ -134,6 +160,7 @@ public class MainApp extends Application {
                 }
                 overviewTable.setItems(buildOverviewRows(snap));
                 divisionsTable.setItems(buildDivisionRows(snap));
+                stockpilesTable.setItems(buildStockpileRows(snap));
             });
 
             t.setOnFailed(e2 -> overviewTable.setItems(javafx.collections.FXCollections.observableArrayList(
@@ -191,6 +218,7 @@ public class MainApp extends Application {
 
                     String text = readAllToString(contentBytes);
                     var templateNames = extractDivisionTemplateNames(text);
+                    var eqMap = extractEquipmentIdToName(text);
 
                     final String finalText = text;
                     javafx.application.Platform.runLater(() -> loadedSaveText = finalText);
@@ -222,6 +250,9 @@ public class MainApp extends Application {
                         loadedIdeology = saveIdeology;
                         loadedDate = date;
                         divisionTemplateNames = templateNames;
+                        equipmentIdToName = eqMap;
+                        log("Loaded equipment defs: " + equipmentIdToName.size());
+                        smokeBtn.setDisable(false);
 
                         if (!finalTags.isEmpty()) {
                             int idx = finalTags.indexOf(playerTag);
@@ -255,6 +286,8 @@ public class MainApp extends Application {
             new Thread(task, "save-loader").start();
         });
 
+        smokeBtn.setOnAction(e -> runSmokeTest(countryBox));
+
         var root = new javafx.scene.layout.BorderPane();
         root.setTop(topRow);
         root.setCenter(tabs);
@@ -275,6 +308,8 @@ public class MainApp extends Application {
     private record OverviewRow(String stat, String value) {}
 
     private record DivisionRow(String template, String count) {}
+
+    private record StockpileRow(String equipment, String amount) {}
 
     private static boolean looksLikeZip(byte[] bytes){
         return bytes.length >= 4
@@ -396,8 +431,6 @@ public class MainApp extends Application {
         s  = s.replace("\u0000", "");
         return s.length() <= maxChars ? s : s.substring(0, maxChars);
     }
-
-
 
     private static java.util.List<String> extractCountryTagsFromCountryBlock(String text) {
         int idx = indexOfCountriesKey(text);
@@ -620,6 +653,46 @@ public class MainApp extends Application {
         return out;
     }
 
+    private static java.util.Map<String, String> extractEquipmentIdToName(String fullText) {
+        String snippet = extractTopLevelKeyBlock(fullText, "equipments");
+        if (snippet == null) return java.util.Map.of();
+
+        var tokens = new com.warroom.parser.Tokenizer(snippet).tokenize();
+        var root = new com.warroom.parser.ClausewitzParser(tokens).parseRoot();
+
+        var eqObj = Clausewitz.get(root, "equipments")
+                .flatMap(Clausewitz::obj)
+                .orElse(null);
+
+        if (eqObj == null) return java.util.Map.of();
+
+        java.util.Map<String, String> out = new java.util.HashMap<>();
+        for (var e : eqObj.map().entrySet()) {
+            String eqName = e.getKey();
+            if (!(e.getValue() instanceof com.warroom.parser.ClausewitzParser.ObjVal defObj)) continue;
+
+            String id = extractIdFromIdBlock(defObj.map().get("id")); // id={ id=123 type=70 }
+            if (id != null) out.put(id, eqName);
+        }
+        return out;
+    }
+
+    private static javafx.collections.ObservableList<StockpileRow> buildStockpileRows(com.warroom.model.CountrySnapshot s) {
+        var rows = javafx.collections.FXCollections.<StockpileRow>observableArrayList();
+
+        var list = s.stockpilesTop10();
+        if (list == null || list.isEmpty()) {
+            rows.add(new StockpileRow("(none found)", "0"));
+            return rows;
+        }
+
+        for (var ea : list) {
+            rows.add(new StockpileRow(ea.equipment(), fmtWhole(ea.amount())));
+        }
+
+        return rows;
+    }
+
     private static void addTemplateFromObj(com.warroom.parser.ClausewitzParser.ObjVal templateObj,
                                            java.util.Map<String, String> out) {
         String name = Clausewitz.get(templateObj, "name").flatMap(Clausewitz::str).orElse(null);
@@ -670,6 +743,104 @@ public class MainApp extends Application {
         return null;
     }
 
+    private void runSmokeTest(javafx.scene.control.ComboBox<String> countryBox) {
+        if (loadedSaveText == null || loadedSaveText.isBlank()) {
+            log("Smoke test: no save loaded.");
+            return;
+        }
+
+        var tags = new java.util.ArrayList<>(countryBox.getItems());
+        if (tags.isEmpty()) {
+            log("Smoke test: no country tags found.");
+            return;
+        }
+
+        log("Smoke test starting… Countries: " + tags.size());
+        javafx.application.Platform.runLater(() -> smokeBtn.setDisable(true));
+
+        javafx.concurrent.Task<Void> task = new javafx.concurrent.Task<>() {
+            @Override
+            protected Void call() {
+                long start = System.currentTimeMillis();
+                int ok = 0;
+                int fail = 0;
+                java.util.List<String> failures = new java.util.ArrayList<>();
+
+                for (int i = 0; i < tags.size(); i++) {
+                    String tag = tags.get(i);
+                    updateMessage("Testing " + tag + " (" + (i + 1) + "/" + tags.size() + ")");
+
+                    try {
+                        String snippet = extractSingleCountrySnippet(loadedSaveText, tag);
+                        if (snippet == null) {
+                            fail++;
+                            failures.add(tag + " — snippet not found");
+                            continue;
+                        }
+
+                        var tokens = new com.warroom.parser.Tokenizer(snippet).tokenize();
+                        var root = new com.warroom.parser.ClausewitzParser(tokens).parseRoot();
+
+                        var countryObj = com.warroom.parser.Clausewitz.get(root, tag)
+                                .flatMap(com.warroom.parser.Clausewitz::obj)
+                                .orElse(null);
+
+                        if (countryObj == null) {
+                            fail++;
+                            failures.add(tag + " — parsed but tag object missing");
+                            continue;
+                        }
+
+
+                        var snap = com.warroom.transform.CountryMapper.from(
+                                tag,
+                                loadedDate,
+                                countryObj,
+                                divisionTemplateNames,
+                                equipmentIdToName
+                        );
+
+                        if (snap == null || snap.tag() == null) {
+                            fail++;
+                            failures.add(tag + " — mapper returned null/invalid snapshot");
+                            continue;
+                        }
+
+                        ok++;
+                    } catch (Exception ex) {
+                        fail++;
+                        failures.add(tag + " — " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+                    }
+                }
+
+                int okFinal = ok;
+                int failFinal = fail;
+
+                javafx.application.Platform.runLater(() -> {
+                    if (!failures.isEmpty()) {
+                        log("Failures (first 50):");
+                        for (int i = 0; i < Math.min(50, failures.size()); i++) {
+                            log("  " + failures.get(i));
+                        }
+                    }
+                    long ms = System.currentTimeMillis() - start;
+                    log("Smoke test complete. OK=" + okFinal + " FAIL=" + failFinal + " (" + ms + "ms)");
+
+                    smokeBtn.setDisable(false);
+
+                });
+
+                return null;
+            }
+        };
+
+        new Thread(task, "smoke-test").start();
+    }
+
+    private void log(String msg) {
+        if (logArea == null) return;
+        javafx.application.Platform.runLater(() -> logArea.appendText(msg + "\n"));
+    }
 
     public static void main(String[] args) {
         launch(args);

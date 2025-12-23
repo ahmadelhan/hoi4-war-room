@@ -14,7 +14,8 @@ public final class CountryMapper {
             String tag,
             String saveDate,
             ClausewitzParser.ObjVal countryObj,
-            java.util.Map<String, String> divisionTemplateNames
+            java.util.Map<String, String> divisionTemplateNames,
+            java.util.Map<String, String> equipmentIdToName
     ) {
         String rulingParty = Clausewitz.pathStr(countryObj, "politics", "ruling_party").orElse(null);
         String ideology = rulingParty;
@@ -25,6 +26,7 @@ public final class CountryMapper {
         Double researchSlots = Clausewitz.pathNum(countryObj, "research_slot").orElse(null);
         Double capital = Clausewitz.get(countryObj, "capital").flatMap(Clausewitz::num).orElse(null);
         Boolean major = Clausewitz.get(countryObj, "major").flatMap(Clausewitz::bool).orElse(null);
+
 
         Double manpower = firstNum(
                 countryObj,
@@ -58,6 +60,7 @@ public final class CountryMapper {
         );
 
         var divisionsByTemplate = extractDivisionsByTemplate(countryObj, divisionTemplateNames);
+        var stockpilesTop10 = extractMarketStockpileTop10(countryObj, equipmentIdToName);
 
         return new CountrySnapshot(
                 tag,
@@ -77,8 +80,8 @@ public final class CountryMapper {
                 researchSlots,
                 capital,
                 major,
-
-                divisionsByTemplate
+                divisionsByTemplate,
+                stockpilesTop10
         );
     }
 
@@ -123,45 +126,108 @@ public final class CountryMapper {
                                                    java.util.Map<String, Integer> out) {
         if (v == null) return;
 
-        if (v instanceof ClausewitzParser.ObjVal obj) {
+        if (v instanceof ClausewitzParser.ObjVal(java.util.Map<String, ClausewitzParser.Value> map)) {
 
-            String templateId = extractTemplateId(obj.map().get("division_template_id"));
+            String templateId = extractTemplateId(map.get("division_template_id"));
             if (templateId != null) {
                 out.merge(templateId, 1, Integer::sum);
             }
 
-            for (var child : obj.map().values()) {
+            for (var child : map.values()) {
                 collectDivisionTemplateIds(child, out);
             }
             return;
         }
 
-        if (v instanceof ClausewitzParser.ListVal lv) {
-            for (var item : lv.list()) {
+        if (v instanceof ClausewitzParser.ListVal(java.util.List<ClausewitzParser.Value> list)) {
+            for (var item : list) {
                 collectDivisionTemplateIds(item, out);
             }
         }
     }
 
     private static String extractTemplateId(ClausewitzParser.Value v) {
-        if (!(v instanceof ClausewitzParser.ObjVal outer)) return null;
+        if (!(v instanceof ClausewitzParser.ObjVal(java.util.Map<String, ClausewitzParser.Value> map))) return null;
 
-        var inner = outer.map().get("id");
-        if (inner instanceof ClausewitzParser.ObjVal innerObj) {
-            var idVal = innerObj.map().get("id");
-            if (idVal instanceof ClausewitzParser.NumVal nv) {
-                return String.format(Locale.US, "%.0f", nv.v());
+        var inner = map.get("id");
+        if (inner instanceof ClausewitzParser.ObjVal(java.util.Map<String, ClausewitzParser.Value> map1)) {
+            var idVal = map1.get("id");
+            if (idVal instanceof ClausewitzParser.NumVal(double v1)) {
+                return String.format(Locale.US, "%.0f", v1);
             }
         }
 
-        var directId = outer.map().get("id");
-        if (directId instanceof ClausewitzParser.NumVal nv2) {
-            return String.format(Locale.US, "%.0f", nv2.v());
+        var directId = map.get("id");
+        if (directId instanceof ClausewitzParser.NumVal(double v1)) {
+            return String.format(Locale.US, "%.0f", v1);
         }
         return null;
     }
 
+    private static java.util.List<com.warroom.model.EquipmentAmount> extractMarketStockpileTop10(
+            ClausewitzParser.ObjVal countryObj,
+            java.util.Map<String, String> equipmentIdToName
+    ) {
+        var marketObj = com.warroom.parser.Clausewitz.path(countryObj, "equipment_market")
+                .flatMap(com.warroom.parser.Clausewitz::obj)
+                .orElse(null);
+        if (marketObj == null) return java.util.List.of();
 
+        var stockObj = com.warroom.parser.Clausewitz.path(marketObj, "market_stockpile")
+                .flatMap(com.warroom.parser.Clausewitz::obj)
+                .orElse(null);
+        if (stockObj == null) return java.util.List.of();
 
+        var equipsObj = com.warroom.parser.Clausewitz.path(stockObj, "equipments")
+                .flatMap(com.warroom.parser.Clausewitz::obj)
+                .orElse(null);
+        if (equipsObj == null) return java.util.List.of();
+
+        java.util.Map<String, Double> totals = new java.util.HashMap<>();
+
+        var eqVal = equipsObj.map().get("equipment");
+        for (var eqEntry : com.warroom.parser.Clausewitz.asObjList(eqVal)) {
+            String eqId = extractEqIdFromEquipmentEntry(eqEntry);
+            Double amt = extractAmountFromEntry(eqEntry);
+            if (eqId != null && amt != null && amt > 0) {
+                totals.merge(eqId, amt, Double::sum);
+            }
+        }
+
+        java.util.List<com.warroom.model.EquipmentAmount> list = new java.util.ArrayList<>();
+        for (var e : totals.entrySet()) {
+            String id = e.getKey();
+            double amt = e.getValue();
+            String name = equipmentIdToName.getOrDefault(id, "equipment_id_" + id);
+            list.add(new com.warroom.model.EquipmentAmount(name, amt));
+        }
+
+        list.sort((a, b) -> Double.compare(b.amount(), a.amount()));
+        if (list.size() > 10) list = list.subList(0, 10);
+        return list;
+    }
+
+    private static Double extractAmountFromEntry(ClausewitzParser.ObjVal obj) {
+        var v = obj.map().get("amount");
+        if (v instanceof ClausewitzParser.NumVal nv) return nv.v();
+        return null;
+    }
+
+    private static String extractEqIdFromEquipmentEntry(ClausewitzParser.ObjVal obj) {
+        // entry looks like: id={ id=123 type=70 }
+        var idBlock = obj.map().get("id");
+        if (!(idBlock instanceof ClausewitzParser.ObjVal idObj)) return null;
+
+        var typeV = idObj.map().get("type");
+        var idV = idObj.map().get("id");
+
+        if (!(typeV instanceof ClausewitzParser.NumVal tnv)) return null;
+        if ((int) tnv.v() != 70) return null;
+
+        if (idV instanceof ClausewitzParser.NumVal inv) {
+            return String.format(java.util.Locale.US, "%.0f", inv.v());
+        }
+        return null;
+    }
 
 }
